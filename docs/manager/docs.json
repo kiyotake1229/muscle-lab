@@ -1,0 +1,17 @@
+{
+  "next_no": 2,
+  "total": 1,
+  "generated_at": "2026-11-19T23:05:04.185382",
+  "documents": [
+    {
+      "no": 1,
+      "date": "2026-11-19",
+      "type": "DOC",
+      "category": "ALL",
+      "title": "現状の仕様と構成",
+      "filename": "20261119_DOC_0001_ALL_現状の仕様と構成.md",
+      "extension": "md",
+      "summary": "毎日の筋トレメニューと食事の目安を自動で出し、やった分だけ培養カプセルの中の「分身」が育つ育成ゲーム。2026-11-19 に初版（v1.0.0）を作り、ルール部分の自動チェック（PASS 207,856項目）と、Claude の内蔵ブラウザ（iPhone サイズ）での通し操作で動作を確認した。PWA化と Claude Artifact での公開まで済み。スマホ実機での確認、GitHub Page"
+    }
+  ]
+}
