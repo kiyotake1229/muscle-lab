@@ -4,9 +4,9 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | **Web版 初版完成（v1.0.0）・PWA化済み**（ホーム画面に追加してオフラインで使える）。iOS化は未着手 |
-| 動作確認用URL | https://claude.ai/artifact/432oUJhnLEvRjkd4Y1PGbL （Claude Artifact。清武のアカウントで開く。2026-11-19 公開） |
-| 一般公開URL | 未公開（GitHub Pages を予定） |
+| 状態 | **Web版 初版完成（v1.0.0）・PWA化済み・GitHub Pages で公開中**（ホーム画面に追加してオフラインで使える）。iOS化は未着手 |
+| 一般公開URL（GitHub Pages） | https://kiyotake1229.github.io/muscle-lab/ （2026-11-19 公開。リポジトリ https://github.com/kiyotake1229/muscle-lab 。main に push すると数十秒〜数分で反映） |
+| 開発確認用（Claude Artifact） | https://claude.ai/artifact/432oUJhnLEvRjkd4Y1PGbL （清武のアカウントで開く。2026-11-19 公開） |
 | 本体 | `index.html`（約180KB・約2,400行。画面・ルール・分身の絵まですべて1ファイル） |
 | 通信 | なし（外部のファイル・フォントも読まない） |
 | データ | 端末内のみ（localStorage のキー `musclelab.v1`）。外部には送らない |
@@ -61,6 +61,7 @@
     make-artifact.sh  Claude Artifact に載せる版を作る
     make-icons.sh     icon.svg から PNG を作り直す
   .claude/            Claude 用の設定（ドキュメント規則、ローカル確認用サーバの設定）
+  .gitignore          git に入れないもの（iOS 化したときの node_modules など）
 ```
 
 ## ローカルで動かす
@@ -81,7 +82,11 @@ node tools/check.mjs
 
 画面を使わずに、メニュー作り・回復・レベル・食事の目安・研究発表を、設定の全組み合わせ（135通り × 77日ぶん）で確かめる。2026-11-19 時点で PASS 207,856 項目。
 
-本体（`index.html`）は、次に開いたときに自動で新しい版に入れ替わる（`sw.js` の作り）。`sw.js` が先に保存するファイルの一覧を変えたときだけ、`sw.js` の `CACHE` の番号を上げる。
+確認が済んだら、docs を1本書いて `git add` → `git commit`（メッセージは `[#連番] 内容`）→ `git push`。GitHub Pages には自動で反映される。
+
+本体（`index.html`）は、利用者の端末では次に開いたときに自動で新しい版に入れ替わる（`sw.js` の作り。更新後の最初の1回は前の版が出る）。`sw.js` が先に保存するファイルの一覧を変えたときだけ、`sw.js` の `CACHE` の番号を上げる。
+
+`sw.js` を直すときの注意: GitHub Pages では清武のアプリがすべて同じドメインに載り、キャッシュの置き場所を共有している。消してよいのは `musclelab-` で始まるキャッシュだけ（#0003）。
 
 ## Claude Artifact に載せる
 
@@ -94,6 +99,8 @@ bash tools/make-artifact.sh 出力先.html
 ## 開発ドキュメント
 
 - 現状の仕様と構成（最初の1本）: [docs/20261119_DOC_0001_ALL_現状の仕様と構成.md](docs/20261119_DOC_0001_ALL_現状の仕様と構成.md)
+- GitHub Pages で公開: [docs/20261119_DPL_0002_ALL_GitHubPagesで公開.md](docs/20261119_DPL_0002_ALL_GitHubPagesで公開.md)
+- ほかのアプリのキャッシュを消してしまう不具合の修正（`sw.js`）: [docs/20261119_BUG_0003_PWA_ほかのアプリのキャッシュを消してしまう不具合.md](docs/20261119_BUG_0003_PWA_ほかのアプリのキャッシュを消してしまう不具合.md)
 - 変更したら1件ごとに文書を足して `bash docs/manager/generate_docs_json.sh` を実行する
 
 ## 残作業
@@ -101,11 +108,15 @@ bash tools/make-artifact.sh 出力先.html
 - [x] Web版の初版（2026-11-19）
 - [x] PWA化（`manifest.json` / `sw.js` / アイコン）— 2026-11-19
 - [x] Claude Artifact で公開 — 2026-11-19
-- [ ] **スマホ実機での確認**（公開した Artifact を清武のスマホで開く。Claude の内蔵ブラウザはサインインできないため、実物の Artifact は未確認。Artifact と同じ制限を手元で再現した環境では動作を確認済み）
+- [x] GitHub Pages で公開 — 2026-11-19（#0002。App Store 申請のサポートURLにもなる）
+- [ ] **スマホ実機での確認**（公開URL https://kiyotake1229.github.io/muscle-lab/ を清武のスマホで開く。Claude の内蔵ブラウザでは動作を確認済み。実物の Artifact のページは、内蔵ブラウザがサインインできないため未確認）
 - [ ] 効果音を耳で確かめる（Claude の確認は音を消して行った）
 - [ ] iPhone の Safari で「ホーム画面に追加」して、アイコンと全画面表示を確かめる
-- [ ] GitHub Pages で公開（App Store 申請のサポートURLにもなる）
 - [ ] iOS化（Capacitor。`habit/ios-app/` を雛形にする）。ローカル通知（実験の時間のお知らせ）と触覚フィードバックを入れる
+
+## このアプリの外に残っていること
+
+- 同じドメイン（`kiyotake1229.github.io`）の兄弟アプリ12本の `sw.js` が、「自分以外のキャッシュを全部消す」書き方のまま。開かれるたびに、マッスルラボを含むほかのアプリのオフライン用キャッシュを消す。マッスルラボの側は、消されても次につながったときに入れ直す（#0003 に一覧と直し方）
 
 ## 今後の候補
 

@@ -1,8 +1,28 @@
 {
-  "next_no": 2,
-  "total": 1,
-  "generated_at": "2026-11-19T23:05:04.185382",
+  "next_no": 4,
+  "total": 3,
+  "generated_at": "2026-11-19T23:20:24.199457",
   "documents": [
+    {
+      "no": 3,
+      "date": "2026-11-19",
+      "type": "BUG",
+      "category": "PWA",
+      "title": "ほかのアプリのキャッシュを消してしまう不具合",
+      "filename": "20261119_BUG_0003_PWA_ほかのアプリのキャッシュを消してしまう不具合.md",
+      "extension": "md",
+      "summary": "GitHub Pages に公開した直後の確認（#0002）で、マッスルラボの Service Worker が、同じドメイン（`kiyotake1229.github.io`）に載っているほかのアプリのオフライン用キャッシュを消してしまうことが分かった。ブラウザのキャッシュの置き場所（Cache Storage）はドメインごとに1つで、全アプリが共有しているのに、古い版を消す処理が「自分の今の版"
+    },
+    {
+      "no": 2,
+      "date": "2026-11-19",
+      "type": "DPL",
+      "category": "ALL",
+      "title": "GitHubPagesで公開",
+      "filename": "20261119_DPL_0002_ALL_GitHubPagesで公開.md",
+      "extension": "md",
+      "summary": "マッスルラボ v1.0.0 を GitHub の公開リポジトリ `kiyotake1229/muscle-lab` に置き、GitHub Pages で一般公開した。公開URLは https://kiyotake1229.github.io/muscle-lab/ 。スマホのブラウザで開くだけで試せて、ホーム画面に追加すればオフラインでも使える。App Store 申請のサポートURLにも使える。"
+    },
     {
       "no": 1,
       "date": "2026-11-19",
