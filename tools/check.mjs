@@ -2,6 +2,7 @@
 // 使い方: node tools/check.mjs
 // index.html の中のスクリプトを取り出して Node.js の中で実行し、
 // メニュー作り・回復・レベル・食事の目安・研究発表を、設定の全組み合わせで確かめる。
+// 最後に、iOS アプリの中だけ動く部分（記録の控え・触覚・お知らせの予約）を、Capacitor を模した環境で確かめる。
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
@@ -176,6 +177,185 @@ for (const goal of goals) for (const equip of equips) for (const minutes of mins
       ok(Math.abs(best.k - tg.k) / tg.k <= tolK, `${tag}: ${st}/${s.id} の例がカロリーの目安から遠い（${best.k} / ${Math.round(tg.k)}）`);
     }
   }
+}
+
+// ---- 5. iOS アプリの中の動き（Capacitor を模した環境で確かめる。実機の通知・振動そのものは確かめられない） ----
+// アプリ本体を、にせものの window.Capacitor がある環境でもう一度動かし、呼び出しの中身を記録して確かめる。
+// 時刻は 2026-11-19 10:00 に固定する（お知らせの予約が、実行した時刻によって変わらないようにするため）。
+function makeNative(opt = {}) {
+  const calls = [], ls = {}, prefs = Object.assign({}, opt.prefs);
+  const state = { perm: opt.perm || 'prompt', grantOnAsk: opt.grantOnAsk !== false, failSchedule: false };
+  const rec = (plugin, method, arg, ret) => { calls.push({ plugin, method, arg }); return Promise.resolve(ret); };
+  const Plugins = opt.noPlugins ? {} : {
+    Haptics: { impact: a => rec('Haptics', 'impact', a) },
+    Preferences: {
+      get: a => (opt.hang ? new Promise(() => {}) : rec('Preferences', 'get', a, { value: a.key in prefs ? prefs[a.key] : null })),
+      set: a => { prefs[a.key] = a.value; return rec('Preferences', 'set', a); },
+      remove: a => { delete prefs[a.key]; return rec('Preferences', 'remove', a); },
+    },
+    LocalNotifications: {
+      checkPermissions: () => rec('LocalNotifications', 'checkPermissions', null, { display: state.perm }),
+      requestPermissions: () => { if (state.perm === 'prompt') state.perm = state.grantOnAsk ? 'granted' : 'denied'; return rec('LocalNotifications', 'requestPermissions', null, { display: state.perm }); },
+      cancel: a => rec('LocalNotifications', 'cancel', a),
+      schedule: a => { calls.push({ plugin: 'LocalNotifications', method: 'schedule', arg: a }); return state.failSchedule ? Promise.reject(new Error('fail')) : Promise.resolve({ notifications: a.notifications.map(n => ({ id: n.id })) }); },
+    },
+  };
+  const FIXED = new Date(2026, 10, 19, 10, 0, 0).getTime();
+  class FakeDate extends Date { constructor(...a) { if (a.length) super(...a); else super(FIXED); } static now() { return FIXED; } }
+  let napi = null;
+  const nctx = {
+    console, performance, setTimeout, clearTimeout, setInterval, clearInterval, Date: FakeDate,
+    localStorage: { getItem: k => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); }, removeItem: k => { delete ls[k]; } },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    window: { Capacitor: { isNativePlatform: () => true, Plugins } },
+    __MLAB_TEST__: a => { napi = a; },
+  };
+  vm.createContext(nctx);
+  vm.runInContext(m[1], nctx, { filename: 'index.html<script>' });
+  const of = (plugin, method) => calls.filter(c => c.plugin === plugin && (!method || c.method === method));
+  return { api: napi, calls, of, ls, prefs, state, FIXED };
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const KEY = 'musclelab.v1';
+function startNative(n, profile) {
+  const S = n.api.defaults();
+  Object.assign(S.profile, { goal: 'bulk', equip: 'body', minutes: 20, freq: 3, sex: 'm', age: 30, height: 172, weight: 68 }, profile);
+  S.onboarded = true;
+  n.api.S = n.api.normalize(S);
+  n.api.startDay();
+}
+{
+  // Web（Capacitor なし）では何も呼ばない
+  ok(api.NATIVE === false, 'Web なのに NATIVE が true になっている');
+  ok(api.defaults().set.remind === false && api.defaults().set.remindAt === '19:00', 'お知らせの初期値が OFF・19:00 でない');
+  const bad = api.defaults(); bad.set.remind = 'yes'; bad.set.remindAt = '25:99';
+  const fixed = api.normalize(JSON.parse(JSON.stringify(bad)));
+  ok(fixed.set.remind === false && fixed.set.remindAt === '19:00', 'お知らせの設定の壊れた値が既定値に直らない');
+  ok((await api.restoreNative()) === false, 'Web なのに控えから戻そうとした');
+  await api.syncRemind();   // 何も起きず、例外も出ないこと
+
+  // 記録の二重保存
+  const n = makeNative();
+  ok(n.api.NATIVE === true, 'にせものの Capacitor を NATIVE と判定できていない');
+  startNative(n);
+  const sets = n.of('Preferences', 'set');
+  ok(sets.length >= 1 && sets[sets.length - 1].arg.key === KEY, '保存したのに Preferences.set が呼ばれていない');
+  ok(n.prefs[KEY] === n.ls[KEY] && n.ls[KEY] === JSON.stringify(n.api.S), 'localStorage と Preferences の中身が同じでない');
+  n.api.S.rp = 777; n.api.save();
+  ok(JSON.parse(n.prefs[KEY] || '{}').rp === 777, '保存し直した内容が Preferences に入っていない');
+  await sleep(1000);   // 保存のあと 0.9秒でお知らせを合わせに行く。OFF なので取り消しだけが呼ばれる
+  ok(n.of('LocalNotifications', 'schedule').length === 0 && n.of('LocalNotifications', 'cancel').length === 1, 'お知らせが OFF なのに予約した（または取り消しを呼んでいない）');
+  ok(n.of('LocalNotifications', 'requestPermissions').length === 0, '起動しただけで通知の許可をたずねた');
+
+  // localStorage が空のときだけ、控えから戻す
+  const snap = n.prefs[KEY];
+  const r1 = makeNative({ prefs: { [KEY]: snap } });
+  r1.api.load();
+  ok(r1.api.S.onboarded === false, '空の localStorage から読んだのに初期状態でない');
+  ok((await r1.api.restoreNative()) === true, '控えがあるのに戻せなかった');
+  ok(r1.api.S.onboarded === true && r1.api.S.rp === 777 && r1.ls[KEY] === JSON.stringify(r1.api.S), '控えから戻した内容が正しくない（または localStorage に書き戻していない）');
+  const r2 = makeNative({ prefs: { [KEY]: snap } });
+  startNative(r2); r2.api.S.rp = 5; r2.api.save(); r2.api.load();
+  ok((await r2.api.restoreNative()) === false && r2.api.S.rp === 5, 'localStorage に記録があるのに控えで上書きした');
+  const r3 = makeNative({ prefs: { [KEY]: '{こわれた' } });
+  r3.api.load();
+  ok((await r3.api.restoreNative()) === false && r3.api.S.onboarded === false, 'こわれた控えを読み込んだ');
+  const r4 = makeNative();
+  r4.api.load();
+  ok((await r4.api.restoreNative()) === false, '控えが無いのに戻したことになっている');
+  const r5 = makeNative({ noPlugins: true });
+  r5.api.load();
+  ok((await r5.api.restoreNative()) === false, '部品が無いときに控えの読み込みが止まる');
+  startNative(r5); r5.api.buzz([30, 50, 30]); await r5.api.syncRemind();
+  ok(r5.ls[KEY] === JSON.stringify(r5.api.S), '部品が無いときに localStorage への保存ができない');
+  const r6 = makeNative({ hang: true });
+  r6.api.load();
+  const t0 = performance.now(), back = await r6.api.restoreNative(), waited = performance.now() - t0;
+  ok(back === false && waited >= 1500 && waited < 4000, `控えの返事が来ないときに、待ちすぎるか待たずに進む（${Math.round(waited)}ms）`);
+
+  // 記録の消去で、控えも消える
+  n.api.reset();
+  ok(!(KEY in n.prefs) && !(KEY in n.ls) && n.of('Preferences', 'remove').length === 1, '記録を消しても Preferences に控えが残っている');
+
+  // 触覚: 振動の長さを強さに読み替える
+  const h = makeNative();
+  startNative(h);
+  h.api.buzz(12); h.api.buzz(25); h.api.buzz(60);
+  ok(h.of('Haptics').map(c => c.arg.style).join(',') === 'LIGHT,MEDIUM,HEAVY', '振動の強さの読み替えが想定と違う');
+  h.calls.length = 0;
+  h.api.buzz([30, 50, 30, 50, 80]);
+  ok(h.of('Haptics').length === 1, '続けて振動させるとき、最初の1回がすぐ出ていない');
+  await sleep(300);
+  ok(h.of('Haptics').map(c => c.arg.style).join(',') === 'MEDIUM,MEDIUM,HEAVY', '続けて振動させるときの回数か強さが想定と違う');
+  h.calls.length = 0; h.api.S.set.haptic = false; h.api.buzz([60, 60, 60]); await sleep(200);
+  ok(h.of('Haptics').length === 0, '振動を OFF にしても Haptics を呼んでいる');
+
+  // お知らせ: 許可・予約・取り消し
+  const q = makeNative({ perm: 'prompt' });
+  startNative(q);
+  await sleep(1000); q.calls.length = 0;
+  ok((await q.api.remindAllow()) === true && q.of('LocalNotifications', 'requestPermissions').length === 1, '許可がまだのときに、許可をたずねていない');
+  q.api.S.set.remind = true; q.api.S.set.remindAt = '19:00'; q.api.save();
+  await q.api.syncRemind();
+  let sch = q.of('LocalNotifications', 'schedule');
+  ok(sch.length === 1, 'お知らせを ON にしたのに予約していない');
+  const list = sch.length ? sch[0].arg.notifications : [];
+  ok(list.length === 14 && list.every((x, i) => x.id === 4100 + i), `予約の件数か番号が想定と違う（${list.length}件）`);
+  ok(list.every(x => typeof x.title === 'string' && x.title && typeof x.body === 'string' && x.body && !/%/.test(x.title + x.body)), '予約の題名か本文が空（または % を含む）');
+  ok(list.every(x => Object.prototype.toString.call(x.schedule.at) === '[object Date]'), '予約の時刻が日付の形（Date）で渡されていない');
+  ok(list.every(x => x.sound === ''), '通知音の指定が無い（iOS では指定が無いと無音になる。空の指定で標準の音が鳴る）');
+  ok(list.every((x, i) => x.schedule.at.getHours() === 19 && x.schedule.at.getMinutes() === 0 && Math.round((x.schedule.at.getTime() - new Date(2026, 10, 19, 19, 0, 0).getTime()) / 86400000) === i), '予約の日時が「今日から14日ぶんの19:00」になっていない');
+  ok(list.length > 0 && list[0].title === '実験の時間です' && /種目（約\d+分）/.test(list[0].body) && list[0].body.includes(q.api.S.profile.name), '今日のぶんの文面に、今日のメニューが入っていない');
+  ok(list.length > 1 && list[1].body === 'ラボを開いて、今日のメニューを確かめましょう。', '明日以降の文面が想定と違う');
+  ok(q.of('LocalNotifications', 'cancel').length === 1 && q.of('LocalNotifications', 'cancel')[0].arg.notifications.length === 14, '予約し直す前に、前の予約（14件）を取り消していない');
+  // 同じ内容なら、呼び直さない
+  q.calls.length = 0; await q.api.syncRemind(false);
+  ok(q.of('LocalNotifications').length === 0, '内容が変わっていないのに予約し直している');
+  // 今日の実験を始めたら、今日のぶんは入れない
+  q.api.initProg().sets[0].push(q.api.S.cur.plan.items[0].reps); q.api.save();
+  await q.api.syncRemind(false);
+  sch = q.of('LocalNotifications', 'schedule');
+  ok(sch.length === 1 && sch[0].arg.notifications.length === 13 && sch[0].arg.notifications[0].id === 4101, '実験を始めたあとも、今日のお知らせを予約している');
+  // 記録を済ませても同じ（内容が変わらないので呼び直さない）
+  q.calls.length = 0; q.api.simulate('ok'); await q.api.syncRemind(false);
+  ok(q.api.S.cur.done === true && q.of('LocalNotifications', 'schedule').length === 0, '記録を済ませたあとの予約が想定と違う');
+  ok(q.api.remindList().length === 13 && q.api.remindList()[0].id === 4101, '記録を済ませたあとも、今日のお知らせが一覧に入っている');
+  // 時刻を過ぎていれば、今日のぶんは入れない（今は 10:00 に固定してある）
+  const q2 = makeNative({ perm: 'granted' });
+  startNative(q2); q2.api.S.set.remind = true; q2.api.S.set.remindAt = '09:30';
+  ok(q2.api.remindList().length === 13 && q2.api.remindList()[0].schedule.at.getTime() > q2.FIXED, '過ぎた時刻のお知らせを予約しようとしている');
+  q2.api.S.set.remindAt = '10:00';
+  ok(q2.api.remindList().every(x => x.schedule.at.getTime() > q2.FIXED + 59000), '直前の時刻のお知らせを予約しようとしている');
+  // 回復日の文面
+  q2.api.S.set.remindAt = '21:15'; ok(q2.api.setRestToday(), '回復日に切り替えられない');
+  const rl = q2.api.remindList();
+  ok(rl.length === 14 && rl[0].title === '今日は回復日です' && rl[0].schedule.at.getHours() === 21 && rl[0].schedule.at.getMinutes() === 15, '回復日の今日のぶんの文面か時刻が想定と違う');
+  q2.api.restCheckIn();
+  ok(q2.api.remindList().length === 13, '回復を記録したあとも、今日のお知らせが一覧に入っている');
+  // 名前に % が入っていても、通知の文面には入れない（iOS が書式の記号として読むおそれがあるため）
+  const q3 = makeNative({ perm: 'granted' });
+  startNative(q3); q3.api.S.profile.name = '100%マッスル'; q3.api.S.set.remind = true;
+  ok(!/%/.test(q3.api.remindList()[0].body) && q3.api.remindList()[0].body.includes('100％マッスル'), '名前の % が通知の文面に残っている');
+  // OFF にしたら取り消すだけ
+  q.calls.length = 0; q.api.S.set.remind = false; q.api.save(); await q.api.syncRemind();
+  ok(q.of('LocalNotifications', 'cancel').length === 1 && q.of('LocalNotifications', 'schedule').length === 0, 'OFF にしたのに取り消していない（または予約した）');
+  // 端末の設定で通知を切られていたら、アプリの中の設定も OFF にして、予約しない
+  const d = makeNative({ perm: 'denied' });
+  startNative(d); d.api.S.set.remind = true; d.api.save();
+  await d.api.syncRemind();
+  ok(d.api.S.set.remind === false && (JSON.parse(d.prefs[KEY] || '{}').set || {}).remind === false && d.of('LocalNotifications', 'schedule').length === 0, '通知が許可されていないのに、設定が ON のまま（または予約した）');
+  ok(d.of('LocalNotifications', 'requestPermissions').length === 0, '起動時の確認で、許可をたずねている');
+  ok((await d.api.remindAllow()) === false, '許可されていないのに、許可されたことになっている');
+  const d2 = makeNative({ perm: 'prompt', grantOnAsk: false });
+  startNative(d2);
+  ok((await d2.api.remindAllow()) === false && d2.api.S.set.remind === false, '許可を断られたのに、許可されたことになっている');
+  // 予約に失敗しても止まらず、次の機会にやり直す
+  const f = makeNative({ perm: 'granted' });
+  startNative(f); f.api.S.set.remind = true; f.state.failSchedule = true;
+  await f.api.syncRemind();
+  f.state.failSchedule = false; f.calls.length = 0;
+  await f.api.syncRemind(false);
+  ok(f.of('LocalNotifications', 'schedule').length === 1 && f.of('LocalNotifications', 'schedule')[0].arg.notifications.length === 14, '予約に失敗したあと、やり直していない');
 }
 
 console.log(`組み合わせ ${combos} 通り × 77日、実験 ${sessionsTotal} 回ぶんを再現`);

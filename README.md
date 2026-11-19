@@ -4,13 +4,13 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | **Web版 初版完成（v1.0.0）・PWA化済み・GitHub Pages で公開中**（ホーム画面に追加してオフラインで使える）。iOS化は未着手 |
+| 状態 | **Web版 初版完成（v1.0.0）・PWA化済み・GitHub Pages で公開中**（ホーム画面に追加してオフラインで使える）。**iOS アプリのプロジェクトを作成済み**（`ios-app/`。2026-11-19。**Xcode でのビルドと実機での動作は未確認**。App Store には未申請） |
 | 一般公開URL（GitHub Pages） | https://kiyotake1229.github.io/muscle-lab/ （2026-11-19 公開。リポジトリ https://github.com/kiyotake1229/muscle-lab 。main に push すると数十秒〜数分で反映） |
 | 開発確認用（Claude Artifact） | https://claude.ai/artifact/432oUJhnLEvRjkd4Y1PGbL （清武のアカウントで開く。2026-11-19 公開） |
-| 本体 | `index.html`（約180KB・約2,400行。画面・ルール・分身の絵まですべて1ファイル） |
+| 本体 | `index.html`（約190KB・約2,500行。画面・ルール・分身の絵まですべて1ファイル。Web 版と iOS アプリで同じファイルを使う） |
 | 通信 | なし（外部のファイル・フォントも読まない） |
-| データ | 端末内のみ（localStorage のキー `musclelab.v1`）。外部には送らない |
-| Bundle ID（予定） | `work.ltv.musclelab` |
+| データ | 端末内のみ（localStorage のキー `musclelab.v1`。iOS アプリの中では、同じ内容を端末の保存領域 UserDefaults にも控えとして書く）。外部には送らない |
+| iOS アプリ | `ios-app/`（Capacitor 7。Bundle ID `work.ltv.musclelab`、バージョン 1.0.0）。岩崎さん向けの手順は [ios-app/岩崎さんへの引き渡し手順.md](ios-app/岩崎さんへの引き渡し手順.md) |
 
 ---
 
@@ -59,9 +59,17 @@
   tools/
     check.mjs         ルール部分の自動チェック（node tools/check.mjs）
     make-artifact.sh  Claude Artifact に載せる版を作る
-    make-icons.sh     icon.svg から PNG を作り直す
+    make-icons.sh     icon.svg から PNG を作り直す（iOS アプリ用の元画像 ios-app/assets/ も作る）
+  ios-app/            iOS アプリ（Capacitor 7）。下の「iOS アプリ」を参照
+    岩崎さんへの引き渡し手順.md   ビルドと App Store 申請の手順・申請情報の下書き
+    package.json / package-lock.json / capacitor.config.json
+    sync-web.sh       index.html とアイコンを www/ にコピーする
+    assets/           アイコン（1024px）と起動画面（2732px）の元画像
+    ios/              Xcode のプロジェクト（開くのは ios/App/App.xcworkspace）
+    www/              同梱する Web 資産（sync-web.sh が作る。git には入れない）
+  .github/workflows/ios-build.yml   iOS のビルド確認（GitHub Actions。Xcode 26・署名なし）
   .claude/            Claude 用の設定（ドキュメント規則、ローカル確認用サーバの設定）
-  .gitignore          git に入れないもの（iOS 化したときの node_modules など）
+  .gitignore          git に入れないもの（ios-app/node_modules など）
 ```
 
 ## ローカルで動かす
@@ -80,13 +88,37 @@ python3 -m http.server 8821 --bind 127.0.0.1
 node tools/check.mjs
 ```
 
-画面を使わずに、メニュー作り・回復・レベル・食事の目安・研究発表を、設定の全組み合わせ（135通り × 77日ぶん）で確かめる。2026-11-19 時点で PASS 207,856 項目。
+画面を使わずに、メニュー作り・回復・レベル・食事の目安・研究発表を、設定の全組み合わせ（135通り × 77日ぶん）で確かめる。最後に、iOS アプリの中だけ動く部分（記録の控え・触覚・お知らせの予約）を、Capacitor を模した環境で確かめる。2026-11-19 に実行して PASS 207,906 項目（うち 50 項目が iOS アプリ向け）。項目数は実行する日によって少し変わる（その日のメニューが日付で決まるため。2026-11-20 は 207,762 項目）。見るのは、失敗（FAIL）が 0 件であること。
 
 確認が済んだら、docs を1本書いて `git add` → `git commit`（メッセージは `[#連番] 内容`）→ `git push`。GitHub Pages には自動で反映される。
 
 本体（`index.html`）は、利用者の端末では次に開いたときに自動で新しい版に入れ替わる（`sw.js` の作り。更新後の最初の1回は前の版が出る）。`sw.js` が先に保存するファイルの一覧を変えたときだけ、`sw.js` の `CACHE` の番号を上げる。
 
 `sw.js` を直すときの注意: GitHub Pages では清武のアプリがすべて同じドメインに載り、キャッシュの置き場所を共有している。消してよいのは `musclelab-` で始まるキャッシュだけ（#0003）。
+
+## iOS アプリ
+
+`ios-app/` は、`index.html` を WebView に同梱した iOS アプリ（Capacitor 7）。本体は Web 版と同じ1ファイルで、アプリの中かどうか（`NATIVE`）で次のところだけ動きが変わる。
+
+| 機能 | Web 版・PWA | iOS アプリ |
+|---|---|---|
+| 振動 | `navigator.vibrate` | Haptics（振動の長さを 弱・中・強 に読み替える） |
+| 記録の保存 | localStorage | localStorage と UserDefaults（Preferences）の2か所。localStorage が空のときだけ、控えから戻す |
+| 実験の時間のお知らせ | 無い（設定にも出ない） | 設定で ON にすると、決めた時刻にローカル通知。初期値は OFF。許可は ON にしたときにたずねる |
+| Service Worker | http(s) で開いたとき登録 | 登録しない（同梱なので不要） |
+
+本体を直したあと、iOS アプリに反映するには:
+
+```bash
+cd ios-app
+npm install      # node_modules/ は約100MB。Dropbox に置いたままにしない（終わったら消す）
+npm run sync     # index.html を同梱し直し、pod install まで行う
+```
+
+- この Mac には Xcode が無い。`npm run sync` は最後の `xcodebuild clean` だけ失敗するが、同梱と `pod install` は済む。Xcode でのビルドは、GitHub Actions（`.github/workflows/ios-build.yml`）か、岩崎さんの Mac で確かめる
+- Xcode は 26 を使う（Capacitor 7 は UIScene に対応していないため、Xcode 27 では起動しないアプリになるおそれがある）
+- アイコンや起動画面を変えるときは、`icon.svg` を直して `bash tools/make-icons.sh` → `ios-app/` で `npm run icons`
+- `ios/App/App/Info.plist`（言語 `ja`・暗号化の申告・縦向き固定・ステータスバーと外観）と `PrivacyInfo.xcprivacy`（プライバシーマニフェスト）は手で入れてある。`ios/` を作り直すときは #0004 の手順で入れ直す
 
 ## Claude Artifact に載せる
 
@@ -101,6 +133,7 @@ bash tools/make-artifact.sh 出力先.html
 - 現状の仕様と構成（最初の1本）: [docs/20261119_DOC_0001_ALL_現状の仕様と構成.md](docs/20261119_DOC_0001_ALL_現状の仕様と構成.md)
 - GitHub Pages で公開: [docs/20261119_DPL_0002_ALL_GitHubPagesで公開.md](docs/20261119_DPL_0002_ALL_GitHubPagesで公開.md)
 - ほかのアプリのキャッシュを消してしまう不具合の修正（`sw.js`）: [docs/20261119_BUG_0003_PWA_ほかのアプリのキャッシュを消してしまう不具合.md](docs/20261119_BUG_0003_PWA_ほかのアプリのキャッシュを消してしまう不具合.md)
+- iOS アプリ化と、通知・触覚・記録の控え: [docs/20261119_NEW_0004_IOS_iOSアプリ化と通知・触覚・記録の控え.md](docs/20261119_NEW_0004_IOS_iOSアプリ化と通知・触覚・記録の控え.md)
 - 変更したら1件ごとに文書を足して `bash docs/manager/generate_docs_json.sh` を実行する
 
 ## 残作業
@@ -112,7 +145,13 @@ bash tools/make-artifact.sh 出力先.html
 - [ ] **スマホ実機での確認**（公開URL https://kiyotake1229.github.io/muscle-lab/ を清武のスマホで開く。Claude の内蔵ブラウザでは動作を確認済み。実物の Artifact のページは、内蔵ブラウザがサインインできないため未確認）
 - [ ] 効果音を耳で確かめる（Claude の確認は音を消して行った）
 - [ ] iPhone の Safari で「ホーム画面に追加」して、アイコンと全画面表示を確かめる
-- [ ] iOS化（Capacitor。`habit/ios-app/` を雛形にする）。ローカル通知（実験の時間のお知らせ）と触覚フィードバックを入れる
+- [x] iOS アプリのプロジェクト作成（Capacitor 7。ローカル通知・触覚・記録の控え・申告）— 2026-11-19（#0004）
+- [ ] **この変更（#0004）のコミットと push**（まだ手元にあるだけ。push すると、公開中の Web 版が新しい本体になり、iOS のビルド確認が GitHub Actions で走る）
+- [ ] **iOS のビルド確認**（GitHub Actions。設定は用意済みで、まだ一度も走っていない。この Mac には Xcode が無い）
+- [ ] iOS の実機での確認（起動、通知の表示と音、振動、ステータスバーとキーボードの色、iPad での表示）。岩崎さんのビルド時に見てもらう
+- [ ] **サポートとプライバシーポリシーのページ**（GitHub Pages に足す）と、**アプリの中からプライバシーポリシーを開くリンク**（審査ガイドライン 5.1.1。申請の前に必須）
+- [ ] App Store 用のスクリーンショット（iPhone 6.9 / 6.5 / 5.5インチ、iPad 13インチ）
+- [ ] App Store 申請（岩崎さん。年齢制限は 9+ になる。手順と下書きは `ios-app/岩崎さんへの引き渡し手順.md`）
 
 ## このアプリの外に残っていること
 
@@ -120,7 +159,8 @@ bash tools/make-artifact.sh 出力先.html
 
 ## 今後の候補
 
-- 実験の時間のお知らせ（iOS のローカル通知）
+- 食事の目安の「計算のしかた」に、計算式の出典（参考文献）を載せる（App Store の審査で求められることがある。審査ガイドライン 1.4.1）
+- UIScene への対応（Capacitor 8 への更新など。Xcode 27 が申請に必須になる前。2027年春の予定）
 - 種目ごとの動きの図（いまは効く部位に色がつく図のみ）
 - 回復日のストレッチメニュー
 - 分身の着せ替え（ランクの報酬を増やす）

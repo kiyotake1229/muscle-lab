@@ -1,0 +1,10 @@
+{
+  "appId": "work.ltv.musclelab",
+  "appName": "マッスルラボ",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#080D18",
+    "preferredContentMode": "mobile"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "musclelab-ios",
+  "version": "1.0.0",
+  "private": true,
+  "description": "マッスルラボ 鍛えた部位がそのまま育つ分身の育成ゲーム iOSアプリ (Capacitorラッパー)",
+  "scripts": {
+    "sync-web": "bash sync-web.sh",
+    "sync": "npm run sync-web && npx cap sync ios",
+    "open": "npx cap open ios",
+    "icons": "npx @capacitor/assets generate --ios --iconBackgroundColor '#080D18' --iconBackgroundColorDark '#080D18' --splashBackgroundColor '#080D18' --splashBackgroundColorDark '#080D18'"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.6.10",
+    "@capacitor/haptics": "^7.0.5",
+    "@capacitor/ios": "^7.6.10",
+    "@capacitor/local-notifications": "^7.0.7",
+    "@capacitor/preferences": "^7.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.6.10"
+  }
+}

@@ -120,6 +120,7 @@ svg{display:block}
 .stepper b,.stepper input{width:58px;text-align:right;font-family:var(--display);font-weight:800;font-size:17px;font-variant-numeric:tabular-nums;background:none;border:0;padding:0;outline:none;-moz-appearance:textfield;appearance:textfield}
 .stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .stepper .unit{font-size:12px;color:var(--muted);width:28px;padding-left:4px}
+.stepper .st-t{width:76px;text-align:center}
 .tg{width:52px;height:31px;border-radius:99px;background:rgba(255,255,255,.14);position:relative;flex:none;transition:background .25s}
 .tg i{position:absolute;top:3px;left:3px;width:25px;height:25px;border-radius:50%;background:#FFFFFF;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .25s cubic-bezier(.3,1.4,.5,1)}
 .tg.on{background:var(--mint)}
@@ -529,12 +530,25 @@ svg{display:block}
    マッスルラボ — 鍛えた部位がそのまま育つ、分身の育成ゲーム
    1ファイル完結・通信なし・保存は端末内（localStorage）のみ
    構成: 1.道具 2.データ 3.保存 4.ルール 5.分身とカプセルの絵 6.画面 7.実験（筋トレ）8.起動
+   iOS アプリ（Capacitor）の中だけ動くもの: 触覚（buzz）・記録の控え（store / restoreNative）・実験の時間のお知らせ（remind〜）。
+   どれも NATIVE が true のときだけ動き、Web・PWA・Claude Artifact では今までどおり
    ===================================================================== */
 const VERSION='1.0.0';
 const SAVE_KEY='musclelab.v1';
 
 /* ---------- 1. 道具 ---------- */
 const HAS_DOM=typeof document!=='undefined'&&!!document.getElementById;
+// iOS アプリ（Capacitor）の中かどうか。Web・PWA・Claude Artifact では NATIVE は false のままで、下の capCall は何もしない
+const CAPG=(typeof window!=='undefined'&&window.Capacitor)||null;
+const NATIVE=!!(CAPG&&typeof CAPG.isNativePlatform==='function'&&CAPG.isNativePlatform());
+const CAP=(NATIVE&&CAPG.Plugins)||{};
+// アプリの部品（プラグイン）を呼ぶ。部品が無い・失敗したときは null を返し、例外は外に出さない
+function capCall(plugin,method,arg){
+  try{
+    const p=CAP[plugin]; if(!p||typeof p[method]!=='function') return Promise.resolve(null);
+    return Promise.resolve(p[method](arg)).then(v=>v===undefined?true:v,()=>null);
+  }catch(e){ return Promise.resolve(null); }
+}
 const $=(s,r)=>(r||document).querySelector(s);
 const $$=(s,r)=>Array.from((r||document).querySelectorAll(s));
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -824,10 +838,11 @@ const TIPS=[
 
 /* ---------- 3. 保存 ---------- */
 let S=null;
+// iOS アプリの中では、同じ内容を端末の保存領域（Preferences）にも書く。localStorage が消えたときの控えになる
 const store={
   get(){ try{ return localStorage.getItem(SAVE_KEY); }catch(e){ return null; } },
-  set(v){ try{ localStorage.setItem(SAVE_KEY,v); return true; }catch(e){ return false; } },
-  del(){ try{ localStorage.removeItem(SAVE_KEY); }catch(e){} },
+  set(v){ if(NATIVE) capCall('Preferences','set',{key:SAVE_KEY,value:v}); try{ localStorage.setItem(SAVE_KEY,v); return true; }catch(e){ return false; } },
+  del(){ if(NATIVE) capCall('Preferences','remove',{key:SAVE_KEY}); try{ localStorage.removeItem(SAVE_KEY); }catch(e){} },
 };
 function defaults(){
   return {
@@ -842,7 +857,7 @@ function defaults(){
     weights:[],       // 体重の記録 [{d,kg}]
     weeks:{},         // 週ごとの研究発表
     totals:{sessions:0,sets:0,rests:0},
-    set:{sound:true,haptic:true,style:'h'},
+    set:{sound:true,haptic:true,style:'h',remind:false,remindAt:'19:00'},   // remind・remindAt は iOS アプリのお知らせ（Web では使わない）
   };
 }
 function normalize(o){
@@ -872,10 +887,26 @@ function normalize(o){
   p.weight=clamp(Math.round((Number(p.weight)||62)*10)/10,30,200);
   p.name=String(p.name||'マッスル1号').slice(0,12);
   if(!STYLES[s.set.style]) s.set.style='h';
+  s.set.remind=s.set.remind===true;
+  if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.set.remindAt)) s.set.remindAt='19:00';
   return s;
 }
-function load(){ let o=null; try{ o=JSON.parse(store.get()||'null'); }catch(e){} S=normalize(o); }
-function save(){ return store.set(JSON.stringify(S)); }
+const isSave=o=>!!(o&&typeof o==='object'&&o.v===1);
+let loadedOk=false;   // localStorage に読める記録があったか
+function load(){ let o=null; try{ o=JSON.parse(store.get()||'null'); }catch(e){} loadedOk=isSave(o); S=normalize(o); }
+function save(){ const ok=store.set(JSON.stringify(S)); remindSoon(); return ok; }
+// iOS アプリの中だけ: localStorage が空（または読めない）のとき、Preferences の控えから記録を戻す。戻したら true
+function restoreNative(){
+  if(!NATIVE||loadedOk) return Promise.resolve(false);
+  const giveUp=new Promise(res=>setTimeout(()=>res(null),2000));   // 返事が来ないときは待たずに進む
+  return Promise.race([capCall('Preferences','get',{key:SAVE_KEY}),giveUp]).then(r=>{
+    let o=null; try{ o=JSON.parse((r&&r.value)||'null'); }catch(e){}
+    if(!isSave(o)) return false;
+    S=normalize(o); loadedOk=true;
+    try{ localStorage.setItem(SAVE_KEY,JSON.stringify(S)); }catch(e){}
+    return true;
+  });
+}
 
 /* ---------- 4. ルール ---------- */
 // レベル: 次のレベルまでの経験値は 60, 85, 110 … と25ずつ増える
@@ -1129,6 +1160,58 @@ function replanToday(){
 }
 const nextDayType=()=>decideType(addDays(S.cur?S.cur.date:today(),1));
 
+// 実験の時間のお知らせ（iOS アプリの中だけ。Web・PWA では何も予約しない）
+// 今日から14日ぶんを、設定した時刻に1日1件ずつ予約する。その日の実験を始めたあと・記録を済ませたあとは、今日のぶんを入れない。
+// 記録を保存するたび・起動したとき・アプリに戻ったときに予約し直すので、今日のぶんはその日の予定に合った文面になる
+const RM_ID=4100, RM_DAYS=14;
+function remindList(){
+  const out=[], c=S.cur, t0=today(), hm=S.set.remindAt.split(':').map(Number), soon=Date.now()+60000;
+  for(let i=0;i<RM_DAYS;i++){
+    const ds=addDays(t0,i), at=parseD(ds); at.setHours(hm[0],hm[1],0,0);
+    if(at.getTime()<=soon) continue;   // 過ぎた時刻・直前の時刻は予約しない
+    let title='実験の時間です', body='ラボを開いて、今日のメニューを確かめましょう。';
+    if(i===0&&c&&c.date===ds){
+      if(c.done||hasSets(c)) continue;
+      if(c.type==='train'&&c.plan) body='今日は '+c.plan.parts.map(p=>PART[p].name).join('・')+' の'+c.plan.items.length+'種目（約'+c.plan.est+'分）。'+S.profile.name.replace(/%/g,'％')+'が待っています。';
+      else{ title='今日は回復日です'; body='回復を記録すると、連続日数が続きます。'; }
+    }
+    // sound は空の指定にする。iOS では指定が無いと無音になり、空（見つからない名前）なら端末の標準の通知音が鳴る
+    out.push({id:RM_ID+i,title,body,sound:'',schedule:{at}});
+  }
+  return out;
+}
+let rmQ=Promise.resolve(), rmSig=null, rmT=null;
+function remindSoon(){ if(!NATIVE) return; clearTimeout(rmT); rmT=setTimeout(()=>syncRemind(false),900); }
+// 予約をいまの記録に合わせる。check が false でなければ、通知の許可がまだ有効かも確かめる（許可をたずねるのは remindAllow だけ）
+function syncRemind(check){ rmQ=rmQ.then(()=>remindRun(check!==false)).catch(()=>{}); return rmQ; }
+async function remindRun(check){
+  if(!NATIVE||!CAP.LocalNotifications) return;
+  if(S.set.remind&&check){
+    const st=await capCall('LocalNotifications','checkPermissions');
+    // 端末の設定で通知を切られていたら、アプリの中の設定も OFF に合わせる
+    if(st&&st.display!=='granted'){ S.set.remind=false; save(); remindUI(); if(HAS_DOM) toast('通知が許可されていないため、お知らせを OFF にしました'); }
+  }
+  const list=S.set.remind?remindList():[];
+  const sig=JSON.stringify(list.map(n=>[n.id,n.title,n.body,n.schedule.at.getTime()]));
+  if(sig===rmSig) return;
+  rmSig=null;
+  await capCall('LocalNotifications','cancel',{notifications:Array.from({length:RM_DAYS},(_,i)=>({id:RM_ID+i}))});
+  if(list.length&&!(await capCall('LocalNotifications','schedule',{notifications:list}))) return;   // 失敗したら次の機会にやり直す
+  rmSig=sig;
+}
+// 通知の許可を確かめる。まだ決まっていなければ iOS の確認ダイアログが出る
+async function remindAllow(){
+  let st=await capCall('LocalNotifications','checkPermissions');
+  if(!st||st.display!=='granted') st=await capCall('LocalNotifications','requestPermissions');
+  return !!(st&&st.display==='granted');
+}
+function remindUI(){
+  if(!HAS_DOM) return;
+  const b=$('#rm-tg'), r=$('#rm-row');
+  if(b){ b.classList.toggle('on',S.set.remind); b.setAttribute('aria-checked',S.set.remind); }
+  if(r) r.hidden=!S.set.remind;
+}
+
 // 食事の目安（Mifflin-St Jeor の式で基礎代謝を出し、活動量と目的で調整する）
 function nutrition(){
   const p=S.profile, off=p.sex==='m'?5:p.sex==='f'?-161:-78;
@@ -1246,6 +1329,7 @@ const ICP={
   copy:'<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/>',
   sound:'<path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4H4ZM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/>',
   vib:'<rect x="8" y="4" width="8" height="16" rx="2"/><path d="M4 9v6M20 9v6"/>',
+  bell:'<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15l1.5-2Z"/><path d="M10 21a2.2 2.2 0 0 0 4 0"/>',
   heart:'<path d="M12 20s-7-4.4-7-9.6A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.4C19 15.6 12 20 12 20Z"/>',
   ban:'<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>',
   star:'<path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.1 5.9-.8L12 3.5Z"/>',
@@ -1544,7 +1628,20 @@ const sfx={
   done(){ [392,523,659,784,1047].forEach((f,i)=>tone(f,.3,'triangle',.09,i*.1)); },
   soft(){ tone(330,.12,'sine',.055); },
 };
-function buzz(p){ if(S.set.haptic&&navigator.vibrate){ try{ navigator.vibrate(p); }catch(e){} } }
+// 振動。iOS アプリの中では Haptics を使い、振動の長さを強さに読み替える（配列は「振動・休み・振動…」の順）。それ以外は navigator.vibrate
+function buzz(p){
+  if(!S.set.haptic) return;
+  if(NATIVE&&CAP.Haptics){
+    const a=Array.isArray(p)?p:[p]; let t=0;
+    for(let i=0;i<a.length;i+=2){
+      const style=a[i]>=50?'HEAVY':a[i]>=20?'MEDIUM':'LIGHT';
+      if(t) setTimeout(()=>capCall('Haptics','impact',{style}),t); else capCall('Haptics','impact',{style});
+      t+=a[i]+(a[i+1]||0);
+    }
+    return;
+  }
+  if(typeof navigator!=='undefined'&&navigator.vibrate){ try{ navigator.vibrate(p); }catch(e){} }
+}
 
 let toastT=null;
 function toast(msg){
@@ -1976,10 +2073,34 @@ function settingsHTML(){
     +'<h3 class="h3">音と振動</h3>'
     +'<div class="frow"><span class="fl">'+ic('sound')+'効果音</span>'+togHTML('sound',S.set.sound,'効果音')+'</div>'
     +'<div class="frow"><span class="fl">'+ic('vib')+'振動</span>'+togHTML('haptic',S.set.haptic,'振動')+'</div>'
+    +(NATIVE?remindHTML():'')
     +'<h3 class="h3">記録の引き継ぎ</h3>'
     +'<div class="col"><button class="btn sec" data-act="export">'+ic('copy')+'記録を書き出す</button><button class="btn sec" data-act="import">記録を読み込む</button><button class="btn ghost danger-t" data-act="reset">すべての記録を消す</button></div>'
     +'<p class="fine">マッスルラボ v'+VERSION+'<br>記録はこの端末の中だけに保存され、外部には送信されません。トレーニングと食事の内容は一般的な目安です。持病やけがのある方は、医師に相談のうえで行ってください。</p>';
 }
+// お知らせの欄（iOS アプリの中だけ出す。Web・PWA には通知を届けるしくみが無いので出さない）
+const remindHTML=()=>'<h3 class="h3">お知らせ</h3>'
+  +'<div class="frow"><span class="fl">'+ic('bell')+'実験の時間のお知らせ</span><button class="tg'+(S.set.remind?' on':'')+'" id="rm-tg" role="switch" aria-checked="'+S.set.remind+'" aria-label="実験の時間のお知らせ" data-act="remind"><i></i></button></div>'
+  +'<div class="col" id="rm-row"'+(S.set.remind?'':' hidden')+'><div class="frow"><span>お知らせの時刻</span><div class="stepper"><button data-act="rm-time" data-v="-1" aria-label="時刻を早める">'+ic('minus')+'</button><b class="st-v st-t" id="rm-v">'+S.set.remindAt+'</b><button data-act="rm-time" data-v="1" aria-label="時刻を遅らせる">'+ic('plus')+'</button></div></div>'
+  +'<p class="fine">時刻は、1回押すと5分、押しつづけると30分ずつ変わります。</p></div>'
+  +'<p class="fine">設定した時刻に、その日の実験をお知らせします。実験を始めたあとと、記録を済ませたあとは届きません。</p>';
+ACT.remind=async()=>{
+  if(S.set.remind){ S.set.remind=false; save(); sfx.tap(); remindUI(); syncRemind(); return; }
+  // ON にするときに、はじめて通知の許可をたずねる
+  if(!(await remindAllow())){ toast('通知が許可されていません。端末の「設定」でマッスルラボの通知を許可してください'); return; }
+  S.set.remind=true; save(); sfx.set(); buzz(18); remindUI(); syncRemind();
+};
+let rmSaveT=null;
+ACT['rm-time']=el=>{
+  const a=S.set.remindAt.split(':').map(Number), dir=Number(el.dataset.v)<0?-1:1;
+  let m=a[0]*60+a[1];
+  // 1回押すと5分。押しつづけているあいだ（holdFired）は30分きざみにそろえて進める
+  if(holdFired) m=dir>0?Math.floor(m/30)*30+30:Math.ceil(m/30)*30-30; else m+=dir*5;
+  m=(m%1440+1440)%1440;
+  S.set.remindAt=pad(Math.floor(m/60))+':'+pad(m%60); sfx.tap();
+  const b=$('#rm-v'); if(b) b.textContent=S.set.remindAt;
+  clearTimeout(rmSaveT); rmSaveT=setTimeout(save,300);
+};
 ACT.settings=()=>{ sfx.tap(); openSheet('設定',settingsHTML(),{cls:'set'}); };
 function afterProfile(el,replan){
   if(replan) replanToday();
@@ -2030,7 +2151,7 @@ ACT['import-go']=()=>{
   if(!o||o.v!==1||!o.profile||!o.parts){ toast('読み込めませんでした。書き出した文字をそのまま貼り付けてください'); return; }
   confirmBox('記録を置き換えます','いまの記録は消えて、読み込んだ内容になります。','置き換える',()=>{
     S=normalize(o); S.onboarded=true; S.cur=validCur(S.cur)?S.cur:null;
-    startDay(); save();
+    startDay(); save(); syncRemind();
     while(SHEETS.length) closeSheet();
     go('home'); toast('記録を読み込みました');
   });
@@ -2038,7 +2159,7 @@ ACT['import-go']=()=>{
 ACT.reset=()=>{
   confirmBox('すべての記録を消します','分身のレベル、記録、設定がすべて消えます。元には戻せません。','消去する',()=>{
     confirmBox('本当に消しますか？','この操作は取り消せません。','すべて消去する',()=>{
-      store.del(); S=defaults(); CAL=null;
+      store.del(); S=defaults(); CAL=null; syncRemind(false);   // 予約してあるお知らせも取り消す
       while(SHEETS.length) closeSheet();
       $('#view').innerHTML=''; openOnboarding();
     },true);
@@ -2342,6 +2463,7 @@ const API={
   get S(){ return S; }, set S(v){ S=v; },
   load,save,defaults,normalize,startDay,decideType,buildPlan,finishWorkout,restCheckIn,toggleMeal,nutrition,slotTarget,mealPick,mealOptions,
   lvInfo,rankIdx,weekReport,checkWeekly,candidates,initProg,setRestToday,setTrainToday,replanToday,recLeft,isReady,streakNow,swapItem,logWeight,targetReps,avatarSVG,growthAll,
+  NATIVE,buzz,restoreNative,remindList,syncRemind,remindAllow,
   shiftDays(n){
     devOffset+=n*86400000;
     try{ sessionStorage.setItem('musclelab.dev',String(devOffset)); }catch(e){}
@@ -2391,12 +2513,20 @@ function boot(){
     if(e.target.id==='pf-name'){ S.profile.name=(e.target.value.trim()||'マッスル1号').slice(0,12); save(); const n=$('.np-name'); if(n) n.textContent=S.profile.name; }
   });
   document.addEventListener('visibilitychange',()=>{
-    if(document.visibilityState==='visible'){ dayWatch(); if(W.open&&W.phase!=='list'&&W.phase!=='result'&&W.phase!=='feel') wakeOn(); }
+    if(document.visibilityState==='visible'){ dayWatch(); if(W.open&&W.phase!=='list'&&W.phase!=='result'&&W.phase!=='feel') wakeOn(); if(NATIVE&&started) syncRemind(); }
   });
   setInterval(dayWatch,60000);
-  renderTabs();
-  if(!S.onboarded) openOnboarding();
-  else{ startDay(); render(true); setTimeout(flushEvents,700); }
+  let started=false;
+  const start=restored=>{
+    started=true;
+    renderTabs();
+    if(!S.onboarded) openOnboarding();
+    else{ startDay(); render(true); setTimeout(flushEvents,700); }
+    if(restored===true) toast('記録を復元しました');
+    if(NATIVE) syncRemind();
+  };
+  // iOS アプリの中で localStorage が空のときだけ、控え（Preferences）から戻すのを待ってから始める。それ以外はすぐ始める
+  if(NATIVE&&!loadedOk) restoreNative().then(start,()=>start(false)); else start(false);
   if(/[?&]debug=1/.test(location.search)) window.__mlab=API;
 }
 if(typeof globalThis!=='undefined'&&typeof globalThis.__MLAB_TEST__==='function') globalThis.__MLAB_TEST__(API);
@@ -2405,8 +2535,8 @@ if(HAS_DOM&&document.getElementById('view')) boot();
 </script>
 <!-- @artifact-end -->
 <script>
-// PWA: Service Worker の登録（file:// や Claude Artifact・iframe の中では登録しない。失敗しても無視）
-if("serviceWorker" in navigator && /^https?:/.test(location.protocol) && window.self===window.top) navigator.serviceWorker.register("sw.js").catch(function(){});
+// PWA: Service Worker の登録（file:// や Claude Artifact・iframe の中、iOS アプリの中では登録しない。失敗しても無視）
+if("serviceWorker" in navigator && /^https?:/.test(location.protocol) && window.self===window.top && !(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())) navigator.serviceWorker.register("sw.js").catch(function(){});
 </script>
 </body>
 </html>

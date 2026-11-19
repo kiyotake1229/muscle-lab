@@ -1,8 +1,18 @@
 {
-  "next_no": 4,
-  "total": 3,
-  "generated_at": "2026-11-19T23:21:57.761614",
+  "next_no": 5,
+  "total": 4,
+  "generated_at": "2026-11-20T00:05:56.567345",
   "documents": [
+    {
+      "no": 4,
+      "date": "2026-11-19",
+      "type": "NEW",
+      "category": "IOS",
+      "title": "iOSアプリ化と通知・触覚・記録の控え",
+      "filename": "20261119_NEW_0004_IOS_iOSアプリ化と通知・触覚・記録の控え.md",
+      "extension": "md",
+      "summary": "Web 版のマッスルラボ（`index.html`）を、Capacitor 7 で iOS アプリにするプロジェクト（`ios-app/`）を作った。アプリの中だけ動く機能として、実験の時間のお知らせ（ローカル通知）、触覚フィードバック、記録の控え（端末の保存領域への二重保存）を本体に足した。Web・PWA・Claude Artifact での動きと、ゲームのルールは変えていない。App Stor"
+    },
     {
       "no": 3,
       "date": "2026-11-19",
