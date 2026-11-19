@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | **Web版 初版完成（v1.0.0）・PWA化済み・GitHub Pages で公開中**（ホーム画面に追加してオフラインで使える）。**iOS アプリのプロジェクトを作成済み**（`ios-app/`。2026-11-19。**Xcode でのビルドと実機での動作は未確認**。App Store には未申請） |
+| 状態 | **Web版 初版完成（v1.0.0）・PWA化済み・GitHub Pages で公開中**（ホーム画面に追加してオフラインで使える）。**iOS アプリのプロジェクトを作成済み**（`ios-app/`。2026-11-19。GitHub Actions でのビルド確認は成功（2026-11-20、Xcode 26.6）。**シミュレータ・実機での起動と動作は未確認**。App Store には未申請） |
 | 一般公開URL（GitHub Pages） | https://kiyotake1229.github.io/muscle-lab/ （2026-11-19 公開。リポジトリ https://github.com/kiyotake1229/muscle-lab 。main に push すると数十秒〜数分で反映） |
 | 開発確認用（Claude Artifact） | https://claude.ai/artifact/432oUJhnLEvRjkd4Y1PGbL （清武のアカウントで開く。2026-11-19 公開） |
 | 本体 | `index.html`（約190KB・約2,500行。画面・ルール・分身の絵まですべて1ファイル。Web 版と iOS アプリで同じファイルを使う） |
@@ -146,8 +146,8 @@ bash tools/make-artifact.sh 出力先.html
 - [ ] 効果音を耳で確かめる（Claude の確認は音を消して行った）
 - [ ] iPhone の Safari で「ホーム画面に追加」して、アイコンと全画面表示を確かめる
 - [x] iOS アプリのプロジェクト作成（Capacitor 7。ローカル通知・触覚・記録の控え・申告）— 2026-11-19（#0004）
-- [ ] **この変更（#0004）のコミットと push**（まだ手元にあるだけ。push すると、公開中の Web 版が新しい本体になり、iOS のビルド確認が GitHub Actions で走る）
-- [ ] **iOS のビルド確認**（GitHub Actions。設定は用意済みで、まだ一度も走っていない。この Mac には Xcode が無い）
+- [x] この変更（#0004）のコミットと push — 2026-11-20（コミット `0c0f5cf`。公開中の Web 版も新しい本体に入れ替わり、内蔵ブラウザで動作を確認済み）
+- [x] iOS のビルド確認（GitHub Actions）— 2026-11-20 に成功（[実行 44551088212](https://github.com/kiyotake1229/muscle-lab/actions/runs/44551088212)。Xcode 26.6。シミュレータ向け Debug と実機向け Release の署名なしビルド、できたアプリに入った申告の点検まで）。この Mac には Xcode が無いので、シミュレータ・実機での起動は未確認
 - [ ] iOS の実機での確認（起動、通知の表示と音、振動、ステータスバーとキーボードの色、iPad での表示）。岩崎さんのビルド時に見てもらう
 - [ ] **サポートとプライバシーポリシーのページ**（GitHub Pages に足す）と、**アプリの中からプライバシーポリシーを開くリンク**（審査ガイドライン 5.1.1。申請の前に必須）
 - [ ] App Store 用のスクリーンショット（iPhone 6.9 / 6.5 / 5.5インチ、iPad 13インチ）
